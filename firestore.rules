@@ -1,0 +1,20 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Koleksi Menu Makanan Dapur Nia
+    match /menus/{menuId} {
+      allow read, write: if true;
+    }
+    
+    // Koleksi Pelanggan Dapur Nia
+    match /customers/{customerId} {
+      allow read, write: if true;
+    }
+    
+    // Koleksi Pesanan Dapur Nia
+    match /orders/{orderId} {
+      allow read, write: if true;
+    }
+  }
+}
