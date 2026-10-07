@@ -54,6 +54,10 @@ export function getIndonesianAuthErrorMessage(error: unknown): string {
       return 'Format email belum benar.'
     case 'auth/too-many-requests':
       return 'Terlalu banyak percobaan, coba lagi nanti.'
+    case 'auth/configuration-not-found':
+      return 'Layanan Authentication belum diaktifkan di Firebase Console. Buka Firebase Console > Authentication, klik "Mulai / Get started", lalu aktifkan metode "Email/Password".'
+    case 'auth/operation-not-allowed':
+      return 'Metode Email/Password belum diaktifkan di Firebase Console. Buka menu Authentication > Sign-in method dan aktifkan "Email/Password".'
     default:
       return err?.message || 'Terjadi kesalahan, coba lagi.'
   }
