@@ -189,10 +189,12 @@ export default function App() {
     setErrorMessage(null)
 
     if (isFirebaseConfigured) {
+      // Tamu hanya perlu memuat koleksi menus (tidak membaca customers/orders yang memerlukan login)
+      const targetCount = currentUser ? 3 : 1
       let loadedCount = 0
       const checkDone = () => {
         loadedCount++
-        if (loadedCount >= 3) setIsLoading(false)
+        if (loadedCount >= targetCount) setIsLoading(false)
       }
 
       const unsubMenus = subscribeMenus(
@@ -206,35 +208,43 @@ export default function App() {
         }
       )
 
-      const unsubCustomers = subscribeCustomers(
-        (items) => {
-          setCustomers(items)
-          checkDone()
-        },
-        (err) => {
-          setErrorMessage('Gagal memuat data pelanggan dari server: ' + err.message)
-          setIsLoading(false)
-        }
-      )
+      let unsubCustomers: (() => void) | undefined
+      let unsubOrders: (() => void) | undefined
 
-      const unsubOrders = subscribeOrders(
-        (items) => {
-          setOrders(items)
-          checkDone()
-        },
-        (err) => {
-          setErrorMessage('Gagal memuat pesanan dari server: ' + err.message)
-          setIsLoading(false)
-        }
-      )
+      if (currentUser) {
+        unsubCustomers = subscribeCustomers(
+          (items) => {
+            setCustomers(items)
+            checkDone()
+          },
+          (err) => {
+            setErrorMessage('Gagal memuat data pelanggan dari server: ' + err.message)
+            setIsLoading(false)
+          }
+        )
+
+        unsubOrders = subscribeOrders(
+          (items) => {
+            setOrders(items)
+            checkDone()
+          },
+          (err) => {
+            setErrorMessage('Gagal memuat pesanan dari server: ' + err.message)
+            setIsLoading(false)
+          }
+        )
+      } else {
+        setCustomers([])
+        setOrders([])
+      }
 
       const timer = setTimeout(() => setIsLoading(false), 1500)
 
       return () => {
         clearTimeout(timer)
         unsubMenus()
-        unsubCustomers()
-        unsubOrders()
+        if (unsubCustomers) unsubCustomers()
+        if (unsubOrders) unsubOrders()
       }
     } else {
       // Mock Data Contoh (Praktik 1)
@@ -243,27 +253,32 @@ export default function App() {
         { id: 'demo-2', nama: 'Nasi Liwet Komplit Solo', harga: 28000, sisa_porsi: 5, kategori: 'Tradisional' },
         { id: 'demo-3', nama: 'Rendang Daging Sapi Suwir', harga: 35000, sisa_porsi: 0, kategori: 'Lauk Utama' },
       ])
-      setCustomers([
-        { id: 'cust-1', nama: 'Ibu Ratna S.', whatsapp: '081234567890', alamat: 'Jl. Melati No. 14, Kebayoran' },
-        { id: 'cust-2', nama: 'Pak Hendra', whatsapp: '081398765432', alamat: 'Gedung Menara Mulia Lt. 5' },
-      ])
-      setOrders([
-        {
-          id: 'ord-1',
-          customer_id: 'cust-1',
-          customer_name: 'Ibu Ratna S.',
-          customer_phone: '081234567890',
-          customer_address: 'Jl. Melati No. 14, Kebayoran',
-          items: [{ menu_id: 'demo-1', nama: 'Paket Ayam Bakar Madu', harga_satuan: 25000, jumlah_porsi: 2, subtotal: 50000 }],
-          ongkir: 10000,
-          total_tagihan: 60000,
-          status: 'menunggu_konfirmasi',
-          created_at: new Date().toISOString(),
-        },
-      ])
+      if (currentUser) {
+        setCustomers([
+          { id: 'cust-1', nama: 'Ibu Ratna S.', whatsapp: '081234567890', alamat: 'Jl. Melati No. 14, Kebayoran' },
+          { id: 'cust-2', nama: 'Pak Hendra', whatsapp: '081398765432', alamat: 'Gedung Menara Mulia Lt. 5' },
+        ])
+        setOrders([
+          {
+            id: 'ord-1',
+            customer_id: 'cust-1',
+            customer_name: 'Ibu Ratna S.',
+            customer_phone: '081234567890',
+            customer_address: 'Jl. Melati No. 14, Kebayoran',
+            items: [{ menu_id: 'demo-1', nama: 'Paket Ayam Bakar Madu', harga_satuan: 25000, jumlah_porsi: 2, subtotal: 50000 }],
+            ongkir: 10000,
+            total_tagihan: 60000,
+            status: 'menunggu_konfirmasi',
+            created_at: new Date().toISOString(),
+          },
+        ])
+      } else {
+        setCustomers([])
+        setOrders([])
+      }
       setIsLoading(false)
     }
-  }, [])
+  }, [currentUser])
 
   // Action: Tambah Menu
   const handleSaveMenu = async (e: React.FormEvent) => {
