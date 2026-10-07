@@ -8,6 +8,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, './src'),
+      '@firebase/auth': path.resolve(import.meta.dirname, './node_modules/@firebase/auth/dist/esm2017/index.js'),
     },
   },
 })

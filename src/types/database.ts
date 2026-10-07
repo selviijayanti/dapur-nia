@@ -4,6 +4,7 @@ export interface MenuItem {
   harga: number
   sisa_porsi: number
   kategori?: string
+  pemilikId?: string
   created_at?: string
 }
 

@@ -17,6 +17,13 @@ import {
   AlertCircle,
   Loader2,
   X,
+  Lock,
+  LogIn,
+  LogOut,
+  User as UserIcon,
+  ShieldCheck,
+  CheckCircle2,
+  Sparkles,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -53,12 +60,27 @@ import {
   STATUS_LABELS,
   VALID_STATUS_FLOW,
 } from '@/services/firestoreService'
+import {
+  subscribeAuthState,
+  logoutUser,
+  type AuthUserProfile,
+} from '@/services/authService'
+import { LoginForm } from '@/components/auth/LoginForm'
+import { RegisterForm } from '@/components/auth/RegisterForm'
+import { pathToRoute, routeToPath, type AppRoute } from '@/lib/router'
 import type { MenuItem, CustomerItem, OrderItem, OrderStatus } from '@/types/database'
 
-type TabType = 'menu' | 'pelanggan' | 'pesanan' | 'laporan'
+// Daftar rute terlindungi (Hanya dapat diakses setelah masuk)
+const PROTECTED_ROUTES: AppRoute[] = ['kelola-menu', 'pelanggan', 'pesanan', 'laporan']
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<TabType>('menu')
+  // Auth state & routing state
+  const [currentUser, setCurrentUser] = useState<AuthUserProfile | null>(null)
+  const [isAuthChecking, setIsAuthChecking] = useState(true)
+  const [currentRoute, setCurrentRoute] = useState<AppRoute>(() => pathToRoute(window.location.pathname))
+  const [intendedDestination, setIntendedDestination] = useState<AppRoute | null>(null)
+  const [redirectNotice, setRedirectNotice] = useState<string | null>(null)
+  const [authNotice, setAuthNotice] = useState<string | null>(null)
 
   // Realtime state from Firestore (or fallback demo)
   const [menus, setMenus] = useState<MenuItem[]>([])
@@ -96,6 +118,70 @@ export default function App() {
 
   // Date Filter untuk Laporan
   const [reportDate, setReportDate] = useState(() => new Date().toISOString().split('T')[0])
+
+  // Navigasi URL & Route
+  const navigateTo = (route: AppRoute, replace = false) => {
+    setCurrentRoute(route)
+    const targetPath = routeToPath(route)
+    if (replace) {
+      window.history.replaceState({}, '', targetPath)
+    } else {
+      window.history.pushState({}, '', targetPath)
+    }
+  }
+
+  // Handle browser back & forward buttons
+  useEffect(() => {
+    const handlePopState = () => {
+      setCurrentRoute(pathToRoute(window.location.pathname))
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
+
+  // Langganan Status Auth (onAuthStateChanged)
+  useEffect(() => {
+    const unsubscribe = subscribeAuthState((user) => {
+      setCurrentUser(user)
+      setIsAuthChecking(false)
+    })
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe()
+    }
+  }, [])
+
+  // Penjagaan Rute Terlindungi (Protected Routes - Sesuai Slide 16, 18, 23 & Modul Bab 2.5)
+  useEffect(() => {
+    if (isAuthChecking) return
+
+    // Jika belum masuk dan mencoba membuka rute terlindungi
+    if (!currentUser && PROTECTED_ROUTES.includes(currentRoute)) {
+      setIntendedDestination(currentRoute)
+      setRedirectNotice(
+        currentRoute === 'kelola-menu'
+          ? 'Silakan masuk terlebih dahulu untuk membuka halaman Kelola Menu.'
+          : 'Silakan masuk terlebih dahulu untuk mengakses menu ini.'
+      )
+      navigateTo('masuk', true)
+    }
+
+    // Jika sudah masuk tapi berada di halaman login / register, arahkan ke Kelola Menu
+    if (currentUser && (currentRoute === 'masuk' || currentRoute === 'daftar')) {
+      const dest = intendedDestination || 'kelola-menu'
+      setIntendedDestination(null)
+      navigateTo(dest, true)
+    }
+  }, [currentUser, currentRoute, isAuthChecking, intendedDestination])
+
+  const handleLogout = async () => {
+    try {
+      await logoutUser()
+      setAuthNotice('Anda telah berhasil keluar.')
+      navigateTo('daftar-menu')
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : 'Gagal keluar')
+    }
+  }
 
   // Initial Sync / Subscriptions dengan Loading & Error State
   useEffect(() => {
@@ -512,6 +598,19 @@ export default function App() {
     0
   )
 
+  if (isAuthChecking) {
+    return (
+      <div className="min-h-screen bg-stone-50 flex flex-col items-center justify-center p-4">
+        <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-600 to-orange-500 flex items-center justify-center text-white shadow-lg shadow-orange-500/20 mb-4 animate-bounce">
+          <ChefHat className="w-8 h-8" />
+        </div>
+        <Loader2 className="w-8 h-8 text-orange-600 animate-spin mb-3" />
+        <p className="text-sm font-semibold text-stone-800">Memeriksa status masuk Dapur Nia...</p>
+        <p className="text-xs text-stone-400 mt-1">Mengamankan hak akses dan sesi pengguna</p>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-stone-100/70 text-stone-900 font-sans flex flex-col">
       <div className="w-full min-h-screen bg-stone-50/50 flex flex-col relative">
@@ -527,7 +626,7 @@ export default function App() {
               <span className={`w-2 h-2 rounded-full ${isFirebaseConfigured ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
               <span>
                 {isFirebaseConfigured
-                  ? 'Firestore Terhubung (Realtime)'
+                  ? 'Firebase Auth & Firestore Terhubung (Realtime)'
                   : 'Mode Demo Lokal (Belum Terhubung)'}
               </span>
             </div>
@@ -544,9 +643,12 @@ export default function App() {
         {/* Top Header */}
         <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-stone-200 px-4 md:px-8 py-3 shadow-xs">
           <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
-            <div className="flex items-center gap-6">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-600 to-orange-500 flex items-center justify-center text-white shadow-md shadow-orange-500/20 shrink-0">
+            <div className="flex items-center gap-5">
+              <div
+                onClick={() => navigateTo(currentUser ? 'kelola-menu' : 'daftar-menu')}
+                className="flex items-center gap-2.5 cursor-pointer group"
+              >
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-600 to-orange-500 flex items-center justify-center text-white shadow-md shadow-orange-500/20 shrink-0 group-hover:scale-105 transition-transform">
                   <ChefHat className="w-6 h-6" />
                 </div>
                 <div>
@@ -554,9 +656,15 @@ export default function App() {
                     <h1 className="text-base md:text-lg font-bold tracking-tight text-stone-900 leading-none">
                       Dapur Nia
                     </h1>
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-orange-300 text-orange-700 bg-orange-50 font-medium">
-                      Sesi 3
-                    </Badge>
+                    {currentUser ? (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-orange-300 text-orange-700 bg-orange-50 font-semibold">
+                        Pemilik
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-stone-300 text-stone-600 bg-stone-100 font-medium">
+                        Tamu
+                      </Badge>
+                    )}
                   </div>
                   <p className="text-xs text-stone-500 mt-0.5">Sistem Katering Cloud Firestore</p>
                 </div>
@@ -564,108 +672,225 @@ export default function App() {
 
               {/* Desktop Navigation Tabs */}
               <nav className="hidden md:flex items-center gap-1 bg-stone-100 p-1 rounded-xl border border-stone-200/80">
-                <button
-                  onClick={() => setActiveTab('menu')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                    activeTab === 'menu'
-                      ? 'bg-white text-orange-600 shadow-xs'
-                      : 'text-stone-600 hover:text-stone-900'
-                  }`}
-                >
-                  <UtensilsCrossed className="w-3.5 h-3.5" />
-                  <span>Menu</span>
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                    activeTab === 'menu' ? 'bg-orange-100 text-orange-700 font-bold' : 'bg-stone-200 text-stone-600'
-                  }`}>
-                    {menus.length}
-                  </span>
-                </button>
+                {currentUser ? (
+                  <>
+                    <button
+                      onClick={() => navigateTo('kelola-menu')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                        currentRoute === 'kelola-menu'
+                          ? 'bg-white text-orange-600 shadow-xs'
+                          : 'text-stone-600 hover:text-stone-900'
+                      }`}
+                    >
+                      <UtensilsCrossed className="w-3.5 h-3.5" />
+                      <span>Kelola Menu</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                        currentRoute === 'kelola-menu' ? 'bg-orange-100 text-orange-700 font-bold' : 'bg-stone-200 text-stone-600'
+                      }`}>
+                        {menus.length}
+                      </span>
+                    </button>
 
-                <button
-                  onClick={() => setActiveTab('pelanggan')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                    activeTab === 'pelanggan'
-                      ? 'bg-white text-orange-600 shadow-xs'
-                      : 'text-stone-600 hover:text-stone-900'
-                  }`}
-                >
-                  <Users className="w-3.5 h-3.5" />
-                  <span>Pelanggan</span>
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                    activeTab === 'pelanggan' ? 'bg-orange-100 text-orange-700 font-bold' : 'bg-stone-200 text-stone-600'
-                  }`}>
-                    {customers.length}
-                  </span>
-                </button>
+                    <button
+                      onClick={() => navigateTo('pelanggan')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                        currentRoute === 'pelanggan'
+                          ? 'bg-white text-orange-600 shadow-xs'
+                          : 'text-stone-600 hover:text-stone-900'
+                      }`}
+                    >
+                      <Users className="w-3.5 h-3.5" />
+                      <span>Pelanggan</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                        currentRoute === 'pelanggan' ? 'bg-orange-100 text-orange-700 font-bold' : 'bg-stone-200 text-stone-600'
+                      }`}>
+                        {customers.length}
+                      </span>
+                    </button>
 
-                <button
-                  onClick={() => setActiveTab('pesanan')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                    activeTab === 'pesanan'
-                      ? 'bg-white text-orange-600 shadow-xs'
-                      : 'text-stone-600 hover:text-stone-900'
-                  }`}
-                >
-                  <ShoppingBag className="w-3.5 h-3.5" />
-                  <span>Pesanan</span>
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                    activeTab === 'pesanan' ? 'bg-orange-100 text-orange-700 font-bold' : 'bg-stone-200 text-stone-600'
-                  }`}>
-                    {orders.length}
-                  </span>
-                </button>
+                    <button
+                      onClick={() => navigateTo('pesanan')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                        currentRoute === 'pesanan'
+                          ? 'bg-white text-orange-600 shadow-xs'
+                          : 'text-stone-600 hover:text-stone-900'
+                      }`}
+                    >
+                      <ShoppingBag className="w-3.5 h-3.5" />
+                      <span>Pesanan</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                        currentRoute === 'pesanan' ? 'bg-orange-100 text-orange-700 font-bold' : 'bg-stone-200 text-stone-600'
+                      }`}>
+                        {orders.length}
+                      </span>
+                    </button>
 
-                <button
-                  onClick={() => setActiveTab('laporan')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                    activeTab === 'laporan'
-                      ? 'bg-white text-orange-600 shadow-xs'
-                      : 'text-stone-600 hover:text-stone-900'
-                  }`}
-                >
-                  <TrendingUp className="w-3.5 h-3.5" />
-                  <span>Laporan</span>
-                </button>
+                    <button
+                      onClick={() => navigateTo('laporan')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                        currentRoute === 'laporan'
+                          ? 'bg-white text-orange-600 shadow-xs'
+                          : 'text-stone-600 hover:text-stone-900'
+                      }`}
+                    >
+                      <TrendingUp className="w-3.5 h-3.5" />
+                      <span>Laporan</span>
+                    </button>
+
+                    <button
+                      onClick={() => navigateTo('daftar-menu')}
+                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                        currentRoute === 'daftar-menu'
+                          ? 'bg-white text-stone-900 shadow-xs'
+                          : 'text-stone-500 hover:text-stone-800'
+                      }`}
+                      title="Lihat tampilan menu dari kacamata Tamu"
+                    >
+                      <span>Menu Publik</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => navigateTo('daftar-menu')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                        currentRoute === 'daftar-menu'
+                          ? 'bg-white text-orange-600 shadow-xs'
+                          : 'text-stone-600 hover:text-stone-900'
+                      }`}
+                    >
+                      <UtensilsCrossed className="w-3.5 h-3.5" />
+                      <span>Daftar Menu</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                        currentRoute === 'daftar-menu' ? 'bg-orange-100 text-orange-700 font-bold' : 'bg-stone-200 text-stone-600'
+                      }`}>
+                        {menus.length}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => navigateTo('kelola-menu')}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-stone-500 hover:text-orange-600 transition-all cursor-pointer"
+                      title="Perlu masuk sebagai pemilik untuk mengelola menu"
+                    >
+                      <Lock className="w-3 h-3 text-stone-400" />
+                      <span>Kelola Menu</span>
+                    </button>
+                  </>
+                )}
               </nav>
             </div>
 
-            {/* Action Button */}
-            <div className="flex items-center gap-2">
-              {activeTab === 'menu' && (
-                <Button
-                  size="sm"
-                  onClick={() => setIsMenuDialogOpen(true)}
-                  className="bg-orange-600 hover:bg-orange-700 text-white rounded-lg shadow-sm gap-1 text-xs px-3 h-8.5"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Tambah Menu</span>
-                </Button>
-              )}
+            {/* Action Buttons & User Profile */}
+            <div className="flex items-center gap-2.5">
+              {currentUser ? (
+                <>
+                  {currentRoute === 'kelola-menu' && (
+                    <Button
+                      size="sm"
+                      onClick={() => setIsMenuDialogOpen(true)}
+                      className="bg-orange-600 hover:bg-orange-700 text-white rounded-lg shadow-sm gap-1 text-xs px-3 h-8.5 font-semibold"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Tambah Menu</span>
+                    </Button>
+                  )}
 
-              {activeTab === 'pelanggan' && (
-                <Button
-                  size="sm"
-                  onClick={() => setIsCustomerDialogOpen(true)}
-                  className="bg-orange-600 hover:bg-orange-700 text-white rounded-lg shadow-sm gap-1 text-xs px-3 h-8.5"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Tambah Pelanggan</span>
-                </Button>
-              )}
+                  {currentRoute === 'pelanggan' && (
+                    <Button
+                      size="sm"
+                      onClick={() => setIsCustomerDialogOpen(true)}
+                      className="bg-orange-600 hover:bg-orange-700 text-white rounded-lg shadow-sm gap-1 text-xs px-3 h-8.5 font-semibold"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Tambah Pelanggan</span>
+                    </Button>
+                  )}
 
-              {activeTab === 'pesanan' && (
-                <Button
-                  size="sm"
-                  onClick={() => setIsOrderDialogOpen(true)}
-                  className="bg-orange-600 hover:bg-orange-700 text-white rounded-lg shadow-sm gap-1 text-xs px-3 h-8.5"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Buat Pesanan</span>
-                </Button>
+                  {currentRoute === 'pesanan' && (
+                    <Button
+                      size="sm"
+                      onClick={() => setIsOrderDialogOpen(true)}
+                      className="bg-orange-600 hover:bg-orange-700 text-white rounded-lg shadow-sm gap-1 text-xs px-3 h-8.5 font-semibold"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Buat Pesanan</span>
+                    </Button>
+                  )}
+
+                  {/* Info Pengguna: Halo, Nia! / Nia · Keluar (Slide 1, 6, 23) */}
+                  <div className="flex items-center gap-2 pl-1 border-l border-stone-200">
+                    <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-orange-50 border border-orange-200 text-xs text-orange-950 font-semibold">
+                      <UserIcon className="w-3.5 h-3.5 text-orange-600" />
+                      <span>Halo, {currentUser.displayName || 'Nia'}!</span>
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleLogout}
+                      className="h-8.5 text-xs px-2.5 rounded-lg border-stone-300 hover:border-red-400 hover:text-red-600 hover:bg-red-50 flex items-center gap-1.5 font-medium transition-colors"
+                      title="Keluar dari akun Dapur Nia"
+                    >
+                      <LogOut className="w-3.5 h-3.5 text-stone-500 hover:text-red-600" />
+                      <span className="hidden sm:inline">Keluar</span>
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <div className="flex items-center gap-2">
+                  {currentRoute === 'masuk' ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => navigateTo('daftar')}
+                      className="h-8.5 text-xs px-3 rounded-lg border-orange-300 text-orange-700 hover:bg-orange-50 font-semibold"
+                    >
+                      Daftar Akun
+                    </Button>
+                  ) : currentRoute === 'daftar' ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => navigateTo('masuk')}
+                      className="h-8.5 text-xs px-3 rounded-lg border-orange-300 text-orange-700 hover:bg-orange-50 font-semibold"
+                    >
+                      Masuk
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      onClick={() => navigateTo('masuk')}
+                      className="bg-orange-600 hover:bg-orange-700 text-white rounded-lg shadow-sm gap-1.5 text-xs px-3.5 h-8.5 font-semibold transition-all"
+                    >
+                      <LogIn className="w-3.5 h-3.5" />
+                      <span>Masuk ke Dapur Nia</span>
+                    </Button>
+                  )}
+                </div>
               )}
             </div>
           </div>
         </header>
+
+        {/* FEEDBACK BANNER: Berhasil Logout / Aksi Auth */}
+        {authNotice && (
+          <div className="max-w-7xl mx-auto w-full px-4 md:px-8 pt-4">
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 px-4 py-2.5 rounded-xl flex items-center justify-between text-xs shadow-xs animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="font-semibold">{authNotice}</span>
+              </div>
+              <button
+                onClick={() => setAuthNotice(null)}
+                className="text-emerald-600 hover:text-emerald-800 p-1"
+                aria-label="Tutup pesan"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ERROR STATE: Banner Pesan Galat Visual (Sesuai PRD Bab 6 & Lembar Praktik 1) */}
         {errorMessage && (
@@ -698,13 +923,144 @@ export default function App() {
             </div>
           ) : (
             <>
-              {/* TAB 1: MENU */}
-              {activeTab === 'menu' && (
+              {/* HALAMAN MASUK (Slide 1, 5, 6, 23) */}
+              {currentRoute === 'masuk' && (
+                <LoginForm
+                  redirectMessage={redirectNotice}
+                  onSuccess={() => {
+                    setRedirectNotice(null)
+                    const dest = intendedDestination || 'kelola-menu'
+                    setIntendedDestination(null)
+                    navigateTo(dest)
+                  }}
+                  onSwitchToRegister={() => navigateTo('daftar')}
+                  onBackToGuestMenu={() => navigateTo('daftar-menu')}
+                />
+              )}
+
+              {/* HALAMAN DAFTAR (Slide 23 & Modul Bab 2.1) */}
+              {currentRoute === 'daftar' && (
+                <RegisterForm
+                  onSuccess={() => {
+                    setRedirectNotice(null)
+                    const dest = intendedDestination || 'kelola-menu'
+                    setIntendedDestination(null)
+                    navigateTo(dest)
+                  }}
+                  onSwitchToLogin={() => navigateTo('masuk')}
+                  onBackToGuestMenu={() => navigateTo('daftar-menu')}
+                />
+              )}
+
+              {/* HALAMAN DAFTAR MENU (PUBLIK / MODE TAMU - Slide 4 & 16) */}
+              {currentRoute === 'daftar-menu' && (
+                <div className="space-y-6">
+                  {/* Banner Mode Tamu */}
+                  {!currentUser ? (
+                    <div className="bg-gradient-to-r from-orange-500 to-amber-600 text-white p-5 rounded-2xl shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="w-4 h-4 text-amber-200" />
+                          <h3 className="font-bold text-sm md:text-base">Katering Harian Dapur Nia</h3>
+                        </div>
+                        <p className="text-xs text-orange-100 max-w-xl">
+                          Anda sedang berada dalam <strong>Mode Tamu</strong> (melihat daftar menu). Pengelola katering dapat masuk untuk mengubah harga, mengelola stok, dan pesanan.
+                        </p>
+                      </div>
+                      <Button
+                        onClick={() => navigateTo('masuk')}
+                        className="bg-white hover:bg-orange-50 text-orange-600 font-bold text-xs h-9 px-4 rounded-xl shadow-xs shrink-0 cursor-pointer"
+                      >
+                        <Lock className="w-3.5 h-3.5 mr-1.5 text-orange-600" />
+                        Masuk sebagai Pemilik
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="bg-orange-50/80 border border-orange-200 text-orange-950 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-orange-600 shrink-0" />
+                        <span>
+                          Ini adalah tampilan <strong>Menu Publik</strong> yang dilihat oleh pengunjung/tamu. Untuk mengedit atau menambah menu, buka menu <strong>Kelola Menu</strong>.
+                        </span>
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={() => navigateTo('kelola-menu')}
+                        className="bg-orange-600 hover:bg-orange-700 text-white text-xs h-7.5 px-3 rounded-lg font-medium shrink-0"
+                      >
+                        Ke Kelola Menu
+                      </Button>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-base md:text-lg font-bold text-stone-900">Daftar Menu Katering</h2>
+                      <p className="text-xs text-stone-500">Pilihan hidangan harian lezat, higienis, dan siap antar</p>
+                    </div>
+                    <Badge variant="secondary" className="bg-orange-100 text-orange-800 text-xs px-2.5 py-0.5">
+                      {menus.length} Menu
+                    </Badge>
+                  </div>
+
+                  {/* Menu Grid (Mode Tamu / Read-Only tanpa tombol ubah & hapus) */}
+                  {menus.length === 0 ? (
+                    <div className="p-12 text-center border-2 border-dashed border-stone-200 rounded-2xl bg-white">
+                      <UtensilsCrossed className="w-10 h-10 text-stone-400 mx-auto mb-2" />
+                      <p className="text-sm font-semibold text-stone-700">Belum ada menu yang ditampilkan</p>
+                      <p className="text-xs text-stone-500 mt-1">Silakan hubungi Dapur Nia untuk informasi menu hari ini.</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                      {menus.map((item) => (
+                        <Card key={item.id} className="border-stone-200/80 shadow-xs hover:border-orange-300 hover:shadow-md transition-all rounded-xl bg-white flex flex-col justify-between">
+                          <CardHeader className="p-4 pb-2">
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <span className="text-[10px] font-semibold uppercase tracking-wider text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded">
+                                  {item.kategori || 'Paket Nasi'}
+                                </span>
+                                <CardTitle className="text-sm font-semibold text-stone-900 mt-1.5 line-clamp-1">
+                                  {item.nama}
+                                </CardTitle>
+                              </div>
+                              <span className="text-sm font-bold text-stone-900 whitespace-nowrap">
+                                {formatRupiah(item.harga)}
+                              </span>
+                            </div>
+                          </CardHeader>
+                          <CardContent className="p-4 pt-2 flex items-center justify-between border-t border-stone-100 mt-3">
+                            <div className="flex items-center gap-1.5">
+                              {item.sisa_porsi > 0 ? (
+                                <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-medium py-0.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>
+                                  Sisa {item.sisa_porsi} porsi
+                                </Badge>
+                              ) : (
+                                <Badge variant="destructive" className="bg-red-50 text-red-700 border border-red-200 text-[11px] font-medium py-0.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 mr-1.5"></span>
+                                  Habis
+                                </Badge>
+                              )}
+                            </div>
+                            <span className="text-[11px] text-stone-400 font-medium">
+                              Katering Harian
+                            </span>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* HALAMAN KELOLA MENU (TERLINDUNGI - Slide 20 & 23) */}
+              {currentRoute === 'kelola-menu' && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h2 className="text-base md:text-lg font-bold text-stone-900">Daftar Menu Harian</h2>
-                      <p className="text-xs text-stone-500">Kelola stok, harga, dan ketersediaan katering</p>
+                      <h2 className="text-base md:text-lg font-bold text-stone-900">Kelola Menu Katering</h2>
+                      <p className="text-xs text-stone-500">Kelola stok, ubah harga, dan ketersediaan menu</p>
                     </div>
                     <Badge variant="secondary" className="bg-orange-100 text-orange-800 text-xs px-2.5 py-0.5">
                       {menus.length} Item
@@ -801,7 +1157,7 @@ export default function App() {
               )}
 
               {/* TAB 2: PELANGGAN */}
-              {activeTab === 'pelanggan' && (
+              {currentRoute === 'pelanggan' && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
@@ -865,7 +1221,7 @@ export default function App() {
               )}
 
               {/* TAB 3: PESANAN */}
-              {activeTab === 'pesanan' && (
+              {currentRoute === 'pesanan' && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
@@ -971,7 +1327,7 @@ export default function App() {
               )}
 
               {/* TAB 4: LAPORAN */}
-              {activeTab === 'laporan' && (
+              {currentRoute === 'laporan' && (
                 <div className="space-y-6">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-xl border border-stone-200">
                     <div>
@@ -1490,45 +1846,87 @@ export default function App() {
 
         {/* Bottom Navigation (Mobile Only) */}
         <nav className="fixed bottom-0 z-30 w-full bg-white/95 backdrop-blur-md border-t border-stone-200 px-3 py-2 flex items-center justify-around shadow-lg md:hidden">
-          <button
-            onClick={() => setActiveTab('menu')}
-            className={`flex flex-col items-center gap-1 transition-colors ${
-              activeTab === 'menu' ? 'text-orange-600 font-bold' : 'text-stone-400 hover:text-stone-600'
-            }`}
-          >
-            <UtensilsCrossed className="w-5 h-5" />
-            <span className="text-[10px]">Menu</span>
-          </button>
+          {currentUser ? (
+            <>
+              <button
+                onClick={() => navigateTo('kelola-menu')}
+                className={`flex flex-col items-center gap-1 transition-colors ${
+                  currentRoute === 'kelola-menu' ? 'text-orange-600 font-bold' : 'text-stone-400 hover:text-stone-600'
+                }`}
+              >
+                <UtensilsCrossed className="w-5 h-5" />
+                <span className="text-[10px]">Menu</span>
+              </button>
 
-          <button
-            onClick={() => setActiveTab('pelanggan')}
-            className={`flex flex-col items-center gap-1 transition-colors ${
-              activeTab === 'pelanggan' ? 'text-orange-600 font-bold' : 'text-stone-400 hover:text-stone-600'
-            }`}
-          >
-            <Users className="w-5 h-5" />
-            <span className="text-[10px]">Pelanggan</span>
-          </button>
+              <button
+                onClick={() => navigateTo('pelanggan')}
+                className={`flex flex-col items-center gap-1 transition-colors ${
+                  currentRoute === 'pelanggan' ? 'text-orange-600 font-bold' : 'text-stone-400 hover:text-stone-600'
+                }`}
+              >
+                <Users className="w-5 h-5" />
+                <span className="text-[10px]">Pelanggan</span>
+              </button>
 
-          <button
-            onClick={() => setActiveTab('pesanan')}
-            className={`flex flex-col items-center gap-1 transition-colors ${
-              activeTab === 'pesanan' ? 'text-orange-600 font-bold' : 'text-stone-400 hover:text-stone-600'
-            }`}
-          >
-            <ShoppingBag className="w-5 h-5" />
-            <span className="text-[10px]">Pesanan</span>
-          </button>
+              <button
+                onClick={() => navigateTo('pesanan')}
+                className={`flex flex-col items-center gap-1 transition-colors ${
+                  currentRoute === 'pesanan' ? 'text-orange-600 font-bold' : 'text-stone-400 hover:text-stone-600'
+                }`}
+              >
+                <ShoppingBag className="w-5 h-5" />
+                <span className="text-[10px]">Pesanan</span>
+              </button>
 
-          <button
-            onClick={() => setActiveTab('laporan')}
-            className={`flex flex-col items-center gap-1 transition-colors ${
-              activeTab === 'laporan' ? 'text-orange-600 font-bold' : 'text-stone-400 hover:text-stone-600'
-            }`}
-          >
-            <TrendingUp className="w-5 h-5" />
-            <span className="text-[10px]">Laporan</span>
-          </button>
+              <button
+                onClick={() => navigateTo('laporan')}
+                className={`flex flex-col items-center gap-1 transition-colors ${
+                  currentRoute === 'laporan' ? 'text-orange-600 font-bold' : 'text-stone-400 hover:text-stone-600'
+                }`}
+              >
+                <TrendingUp className="w-5 h-5" />
+                <span className="text-[10px]">Laporan</span>
+              </button>
+
+              <button
+                onClick={handleLogout}
+                className="flex flex-col items-center gap-1 transition-colors text-stone-400 hover:text-red-600"
+              >
+                <LogOut className="w-5 h-5" />
+                <span className="text-[10px]">Keluar</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => navigateTo('daftar-menu')}
+                className={`flex flex-col items-center gap-1 transition-colors ${
+                  currentRoute === 'daftar-menu' ? 'text-orange-600 font-bold' : 'text-stone-400 hover:text-stone-600'
+                }`}
+              >
+                <UtensilsCrossed className="w-5 h-5" />
+                <span className="text-[10px]">Menu</span>
+              </button>
+
+              <button
+                onClick={() => navigateTo('kelola-menu')}
+                className="flex flex-col items-center gap-1 transition-colors text-stone-400 hover:text-orange-600"
+              >
+                <Lock className="w-5 h-5" />
+                <span className="text-[10px]">Kelola</span>
+              </button>
+
+              <button
+                onClick={() => navigateTo('masuk')}
+                className={`flex flex-col items-center gap-1 transition-colors ${
+                  currentRoute === 'masuk' ? 'text-orange-600 font-bold' : 'text-stone-400 hover:text-stone-600'
+                }`}
+              >
+                <LogIn className="w-5 h-5" />
+                <span className="text-[10px]">Masuk</span>
+              </button>
+            </>
+          )}
         </nav>
 
       </div>

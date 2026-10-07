@@ -9,7 +9,7 @@ import {
   orderBy,
   runTransaction,
 } from 'firebase/firestore'
-import { db, isFirebaseConfigured } from '@/lib/firebase'
+import { db, auth, isFirebaseConfigured } from '@/lib/firebase'
 import type { MenuItem, CustomerItem, OrderItem, OrderStatus } from '@/types/database'
 
 // Koleksi Firestore
@@ -63,8 +63,11 @@ export async function createMenu(menu: Omit<MenuItem, 'id'>) {
   if (menu.harga <= 0) throw new Error('Harga menu harus bernilai positif!')
   if (menu.sisa_porsi < 0) throw new Error('Sisa porsi tidak boleh bernilai negatif!')
 
+  const currentUid = auth?.currentUser?.uid || null
+
   return await addDoc(collection(db, MENUS_COLLECTION), {
     ...menu,
+    pemilikId: currentUid,
     created_at: new Date().toISOString(),
   })
 }
